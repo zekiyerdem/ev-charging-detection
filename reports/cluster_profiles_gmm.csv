@@ -1,0 +1,8 @@
+,homes,big_block_rate,big_block_kw,big_block_hours,big_block_evening_share,big_block_flatness,small_block_rate,small_block_evening_share,high_night_share,night_temp_corr,big_block_start_spread,small_block_start_spread,block_winter_share,name
+0,371,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.03,-0.83,6.0,6.0,0.0,Typical home
+1,46,0.35,6.14,3.35,1.0,0.98,0.19,1.0,0.34,-0.26,0.73,1.2,0.24,EV (Level 2 pattern)
+2,34,0.23,4.22,29.03,0.73,0.93,0.07,0.77,0.47,-0.96,5.15,5.12,0.43,Electric heating
+3,52,0.0,3.87,2.0,1.0,0.96,0.0,0.0,0.05,-0.83,6.0,6.0,0.0,Typical home
+4,27,0.0,0.0,0.0,0.0,0.0,0.01,0.0,0.01,-0.36,6.0,1.54,0.0,Typical home
+5,32,0.25,4.72,2.31,0.84,0.98,0.03,1.0,0.28,-0.29,1.12,0.94,0.28,Other large appliance
+6,38,0.0,0.0,0.0,0.0,0.0,0.18,0.82,0.25,-0.45,6.0,2.47,0.41,EV (Level 1 pattern)

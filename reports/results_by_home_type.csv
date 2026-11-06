@@ -1,0 +1,7 @@
+type,homes,flagged_as_ev
+EV L1,28,28
+EV L2,62,46
+baseboard_heat,34,0
+hot_tub,22,4
+no EV,437,6
+water_heater,17,0

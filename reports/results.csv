@@ -1,0 +1,4 @@
+method,precision,recall,f1,estimated_ev_homes,true_ev_homes,adjusted_rand_index
+Baseline: K-Means on average daily profile,1.0,0.444,0.615,40,90,0.111
+Features + K-Means (k=7),0.822,0.978,0.893,107,90,0.241
+Features + Gaussian Mixture (k=7),0.881,0.822,0.851,84,90,0.37
