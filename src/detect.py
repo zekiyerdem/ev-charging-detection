@@ -64,6 +64,30 @@ def pick_ev_clusters(X: pd.DataFrame, labels: np.ndarray):
     return [c for c in desc.index if desc.loc[c, "name"].startswith("EV")], desc
 
 
+def cluster_homes(X: pd.DataFrame, k: int = 7, seed: int = 0) -> dict:
+    """Standardise features, run K-Means and GMM, name the clusters, flag EV homes."""
+    Xs = pd.DataFrame(StandardScaler().fit_transform(X), index=X.index, columns=X.columns)
+    km = KMeans(n_clusters=k, n_init=50, random_state=seed).fit(Xs)
+    ev_c, desc_km = pick_ev_clusters(X, km.labels_)
+    gmm = GaussianMixture(n_components=k, covariance_type="full", random_state=seed, n_init=5).fit(Xs)
+    g_labels = gmm.predict(Xs)
+    ev_g, desc_g = pick_ev_clusters(X, g_labels)
+    prob_ev = gmm.predict_proba(Xs)[:, ev_g].sum(axis=1)
+    return {"Xs": Xs, "km_labels": km.labels_, "ev_c": ev_c, "desc_km": desc_km,
+            "pred_km": np.isin(km.labels_, ev_c).astype(int),
+            "g_labels": g_labels, "ev_g": ev_g, "desc_g": desc_g, "prob_ev": prob_ev,
+            "pred_gmm": (prob_ev >= 0.5).astype(int)}
+
+
+def home_type(homes: pd.DataFrame) -> pd.Series:
+    """Readable home type from the hidden labels, e.g. 'EV L2 every-night' or 'hot_tub'."""
+    pattern = homes.get("charging_pattern", pd.Series("", index=homes.index)).fillna("")
+    ev = "EV " + homes["charger_level"].astype(str) + np.where(pattern == "every_night", " every-night", "")
+    look = homes["lookalike"].fillna("")
+    return pd.Series(np.where(homes["has_ev"] == 1, ev, np.where(look != "", look, "no EV")),
+                     index=homes.index)
+
+
 def evaluate(name, y_true, y_pred, cluster_labels=None):
     out = {
         "method": name,
@@ -78,7 +102,7 @@ def evaluate(name, y_true, y_pred, cluster_labels=None):
     return out
 
 
-def main(data="data", reports="reports", k=7, seed=0):
+def main(data="data", reports="reports", k=7, seed=0, baseline="median"):
     data, reports = Path(data), Path(reports)
     fig_dir = reports / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
@@ -99,33 +123,26 @@ def main(data="data", reports="reports", k=7, seed=0):
     results.append(evaluate("Baseline: K-Means on average daily profile", y, pred0, km0.labels_))
 
     # ---- 2) engineered features ----
-    feats = build_features(readings, weather)
+    feats = build_features(readings, weather, baseline)
     feats.to_csv(reports / "home_features.csv")
     X = feats[FEATURES_FOR_CLUSTERING]
-    Xs = pd.DataFrame(StandardScaler().fit_transform(X), index=X.index, columns=X.columns)
-    y = homes.loc[Xs.index, "has_ev"].to_numpy()
+    y = homes.loc[X.index, "has_ev"].to_numpy()
+    c = cluster_homes(X, k, seed)
+    Xs, km, g_labels, ev_c, ev_g = c["Xs"], c["km_labels"], c["g_labels"], c["ev_c"], c["ev_g"]
+    desc_g, desc_km, prob_ev, pred_km, pred_gmm = c["desc_g"], c["desc_km"], c["prob_ev"], c["pred_km"], c["pred_gmm"]
 
     # choose k by silhouette (for information)
     sil = {kk: round(silhouette_score(Xs, KMeans(n_clusters=kk, n_init=20, random_state=seed).fit_predict(Xs)), 3)
            for kk in range(2, 8)}
 
-    km = KMeans(n_clusters=k, n_init=50, random_state=seed).fit(Xs)
-    ev_c, desc_km = pick_ev_clusters(X, km.labels_)
-    pred_km = np.isin(km.labels_, ev_c).astype(int)
-    results.append(evaluate(f"Features + K-Means (k={k})", y, pred_km, km.labels_))
-
-    gmm = GaussianMixture(n_components=k, covariance_type="full", random_state=seed, n_init=5).fit(Xs)
-    g_labels = gmm.predict(Xs)
-    ev_g, desc_g = pick_ev_clusters(X, g_labels)
+    results.append(evaluate(f"Features + K-Means (k={k})", y, pred_km, km))
     desc_g.round(2).to_csv(reports / "cluster_profiles_gmm.csv")
     desc_km.round(2).to_csv(reports / "cluster_profiles_kmeans.csv")
-    prob_ev = gmm.predict_proba(Xs)[:, ev_g].sum(axis=1)
-    pred_gmm = (prob_ev >= 0.5).astype(int)
     results.append(evaluate(f"Features + Gaussian Mixture (k={k})", y, pred_gmm, g_labels))
 
     # ---- save outputs ----
     out = homes.loc[Xs.index].copy()
-    out["kmeans_cluster"] = km.labels_
+    out["kmeans_cluster"] = km
     out["gmm_cluster"] = g_labels
     out["ev_probability_gmm"] = np.round(prob_ev, 3)
     out["predicted_ev"] = pred_gmm
@@ -135,8 +152,7 @@ def main(data="data", reports="reports", k=7, seed=0):
     res.to_csv(reports / "results.csv", index=False)
 
     # who fooled the model? errors by home type
-    out["type"] = np.where(out["has_ev"] == 1, "EV " + out["charger_level"].astype(str),
-                           np.where(out["lookalike"].fillna("") != "", out["lookalike"].fillna(""), "no EV"))
+    out["type"] = home_type(out)
     by_type = out.groupby("type")["predicted_ev"].agg(["count", "sum"]).rename(
         columns={"count": "homes", "sum": "flagged_as_ev"})
     by_type.to_csv(reports / "results_by_home_type.csv")
@@ -185,5 +201,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--data", default="data"); p.add_argument("--reports", default="reports")
     p.add_argument("--k", type=int, default=7); p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--baseline", default="median", help="typical-load method, see features.BASELINES")
     a = p.parse_args()
-    main(a.data, a.reports, a.k, a.seed)
+    main(a.data, a.reports, a.k, a.seed, a.baseline)

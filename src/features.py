@@ -5,8 +5,11 @@ Key idea: home EV charging shows up as a *flat, high block* of extra power that
 or overnight, and (4) happens on some nights but not others. Normal household
 use, heating and air conditioning do not look like that.
 
-We compare each hour with the same home's *typical* load for that hour of day
-(the median over the year), so every home is judged against its own baseline.
+We compare each hour with the same home's *typical* load for that hour of day,
+so every home is judged against its own baseline. The default typical load is the
+median over the year for each hour of day. That fails for homes that charge on
+most nights: the charging becomes part of the median and the blocks vanish.
+`BASELINES` lists the alternatives compared in compare_baselines.py.
 """
 import numpy as np
 import pandas as pd
@@ -28,6 +31,76 @@ def to_cube(readings: pd.DataFrame):
     return home_ids, pd.DatetimeIndex(days), cube
 
 
+BASELINES = {
+    "median": "median of each hour of day over the year (original method)",
+    "p20": "20th percentile of each hour of day over the year",
+    "quiet_nights": "median of each hour of day over quiet nights only (no big night load)",
+    "rolling": "rolling 29-day median of each hour of day (follows the seasons)",
+    "edges": "no baseline: blocks start with a jump and end with a matching drop",
+}
+
+
+def typical_load(home_cube: np.ndarray, method: str = "median") -> np.ndarray:
+    """Typical kWh for every day and hour, shape (days, 24), for one home."""
+    n_days = home_cube.shape[0]
+    if method == "median":
+        typ = np.nanmedian(home_cube, axis=0)
+    elif method == "p20":
+        typ = np.nanpercentile(home_cube, 20, axis=0)
+    elif method == "quiet_nights":
+        # a night is "quiet" when its largest hour (22:00-07:00) is close to the home's
+        # quietest nights; charging nights are left out of the baseline
+        night_max = np.nanmax(home_cube[:, list(range(0, 8)) + [22, 23]], axis=1)
+        quiet = night_max <= np.nanpercentile(night_max, 10) + 1.0
+        if quiet.sum() >= 10:
+            typ = np.nanmedian(home_cube[quiet], axis=0)
+        else:                                            # too few quiet nights: fall back
+            typ = np.nanpercentile(home_cube, 10, axis=0)
+    elif method == "rolling":
+        typ = (pd.DataFrame(home_cube)
+                 .rolling(29, center=True, min_periods=8).median()
+                 .to_numpy())
+        return typ
+    else:
+        raise ValueError(f"unknown baseline {method!r}; choose from {list(BASELINES)}")
+    return np.broadcast_to(typ, (n_days, 24))
+
+
+def edge_excess(flat: np.ndarray, min_jump: float = 1.1, max_hours: int = 14) -> np.ndarray:
+    """Excess load from on/off edges, with no baseline at all.
+
+    A block starts where load jumps up by >= min_jump kW from one hour to the next and
+    ends at the first hour (within max_hours) where load falls back below the level
+    before the jump plus half the jump. Inside the block, excess = load minus the level
+    before the jump. Everything else is 0."""
+    ex = np.zeros_like(flat, dtype=float)
+    n, t = len(flat), 1
+    while t < n:
+        jump = flat[t] - flat[t - 1]
+        if jump >= min_jump:
+            level0 = flat[t - 1]
+            end = next((t2 for t2 in range(t + 1, min(t + max_hours + 1, n))
+                        if flat[t2] < level0 + 0.5 * jump), None)
+            if end is not None:
+                ex[t:end] = flat[t:end] - level0
+                t = end
+                continue
+        t += 1
+    return ex
+
+
+def excess_series(home_cube: np.ndarray, baseline: str = "median") -> np.ndarray:
+    """Hourly extra load (kWh) above the home's typical load, as one flat series."""
+    if baseline == "edges":
+        return edge_excess(home_cube.reshape(-1))
+    return (home_cube - typical_load(home_cube, baseline)).reshape(-1)
+
+
+def charging_blocks(excess: np.ndarray):
+    """Level-2-like blocks (>= 3.5 kW for >= 2 h) and Level-1-like blocks (>= 1.1 kW for >= 4 h)."""
+    return find_blocks(excess, 3.5, 2), find_blocks(excess, 1.1, 4)
+
+
 def find_blocks(excess_series: np.ndarray, min_kw: float, min_hours: int):
     """Find runs where excess load stays >= min_kw for at least min_hours.
 
@@ -47,18 +120,16 @@ def find_blocks(excess_series: np.ndarray, min_kw: float, min_hours: int):
     return blocks
 
 
-def home_features(home_cube: np.ndarray, days: pd.DatetimeIndex, temp_by_day: np.ndarray):
-    """Features for one home. home_cube: (days, 24) kWh."""
+def home_features(home_cube: np.ndarray, days: pd.DatetimeIndex, temp_by_day: np.ndarray,
+                  baseline: str = "median"):
+    """Features for one home. home_cube: (days, 24) kWh. baseline: a key of BASELINES."""
     flat = home_cube.reshape(-1)                         # continuous hourly series
-    typical = np.nanmedian(home_cube, axis=0)            # typical kWh for each hour of day
-    excess = (home_cube - typical).reshape(-1)           # extra load above the home's own normal
+    excess = excess_series(home_cube, baseline)          # extra load above the home's own normal
     hours_of_day = np.tile(np.arange(24), len(days))
     n_days = len(days)
 
-    # Level-2-like blocks: >= 3.5 kW extra for >= 2 hours
-    big = find_blocks(excess, 3.5, 2)
-    # Level-1-like blocks: >= 1.1 kW extra for >= 4 hours
-    small = find_blocks(excess, 1.1, 4)
+    # Level-2-like blocks (>= 3.5 kW for >= 2 h) and Level-1-like blocks (>= 1.1 kW for >= 4 h)
+    big, small = charging_blocks(excess)
 
     def evening_night_share(blocks):
         if not blocks:
@@ -84,7 +155,8 @@ def home_features(home_cube: np.ndarray, days: pd.DatetimeIndex, temp_by_day: np
         starts = np.array([hours_of_day[s] for s, _, _ in blocks])
         ang = 2 * np.pi * starts / 24                      # circular: 23:00 and 00:00 are close
         r = np.hypot(np.cos(ang).mean(), np.sin(ang).mean())
-        return float(np.sqrt(-2 * np.log(max(r, 1e-6))) * 24 / (2 * np.pi))
+        r = min(max(r, 1e-6), 1.0)                         # all-identical starts can give r = 1 + rounding
+        return float(np.sqrt(-2 * np.log(r)) * 24 / (2 * np.pi))
 
     months = days.month.values
     def winter_share(blocks):
@@ -118,14 +190,14 @@ def home_features(home_cube: np.ndarray, days: pd.DatetimeIndex, temp_by_day: np
     }
 
 
-def build_features(readings: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
+def build_features(readings: pd.DataFrame, weather: pd.DataFrame, baseline: str = "median") -> pd.DataFrame:
     home_ids, days, cube = to_cube(readings)
     w = weather.copy()
     w["day"] = pd.to_datetime(w["timestamp"]).dt.normalize()
     temp_by_day = w.groupby("day")["temp_c"].mean().reindex(days).to_numpy()
     rows = []
     for k, hid in enumerate(home_ids):
-        f = home_features(cube[k], days, temp_by_day)
+        f = home_features(cube[k], days, temp_by_day, baseline)
         f["home_id"] = hid
         rows.append(f)
     return pd.DataFrame(rows).set_index("home_id")
