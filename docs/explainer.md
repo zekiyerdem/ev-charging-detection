@@ -7,7 +7,7 @@ Utilities and grid operators want to know **where EVs are charging at home**, be
 We usually **don't have labels** (who owns an EV). Clustering groups homes with similar behaviour, then an analyst looks at each group's typical home and decides what it is. If a few labels exist (e.g. from a rebate program), they can be used to check or improve the clusters.
 
 ## Why not just cluster the daily load curve?
-Averaging a year of data hides charging that happens only on some nights, and the timing varies. That's why the baseline only found 44% of EV homes. Building **features that describe the physical event** (a flat block of extra power) works much better.
+Averaging a year of data hides charging that happens only on some nights, and the timing varies. That's why the baseline only found 34% of EV homes. Building **features that describe the physical event** (a flat block of extra power) works much better.
 
 ## The features, in one line each
 * `big_block_rate`: how often a ≥3.5 kW extra block lasting ≥2 h happens (Level 2).
@@ -24,6 +24,7 @@ Averaging a year of data hides charging that happens only on some nights, and th
 * Standardised features so no single unit dominates.
 * Compared K-Means (hard, round clusters) with a Gaussian Mixture Model (soft clusters + a probability per home).
 * Looked at silhouette scores, but chose k by **whether clusters were interpretable**, then validated against the hidden labels: precision, recall, F1, adjusted Rand index.
+* Final decision: K-Means on the combined low-percentile + edge features, repeated over k = 5–9 and 5 seeds; a home is an EV home when at least half the runs say so. That finds 118 of 120 EV homes and flags 139; all 21 false alarms are hot tubs.
 
 ## Talking points
 * "I'd start with physically meaningful features, not raw curves, because charging is intermittent."

@@ -1,0 +1,8 @@
+kmeans_cluster,name,EV L1,EV L1 every-night,EV L2,EV L2 every-night,baseboard_heat,hot_tub,no EV,water_heater
+0,EV (Level 2 pattern),0,0,62,21,0,20,0,0
+1,Typical home,0,0,0,1,0,2,48,16
+2,Typical home,0,0,0,0,0,0,213,0
+3,Electric heating,0,0,0,0,34,0,0,0
+4,Electric heating,0,0,0,0,0,0,109,0
+5,EV (Level 1 pattern),28,7,0,0,0,0,0,0
+6,Electric heating,0,0,0,1,0,0,67,1

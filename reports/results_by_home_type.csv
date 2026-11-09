@@ -1,9 +1,9 @@
-type,homes,flagged_as_ev
-EV L1,28,28
-EV L1 every-night,7,7
-EV L2,62,62
-EV L2 every-night,23,15
-baseboard_heat,34,0
-hot_tub,22,21
-no EV,437,13
-water_heater,17,0
+type,homes,flagged_as_ev,flagged_by_original_gmm
+EV L1,28,28,28
+EV L1 every-night,7,7,7
+EV L2,62,62,62
+EV L2 every-night,23,21,15
+baseboard_heat,34,0,0
+hot_tub,22,21,21
+no EV,437,0,13
+water_heater,17,0,0
