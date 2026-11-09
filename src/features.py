@@ -37,6 +37,7 @@ BASELINES = {
     "quiet_nights": "median of each hour of day over quiet nights only (no big night load)",
     "rolling": "rolling 29-day median of each hour of day (follows the seasons)",
     "edges": "no baseline: blocks start with a jump and end with a matching drop",
+    "p20_edges": "the larger of the p20 excess and the edge excess, hour by hour",
 }
 
 
@@ -93,6 +94,11 @@ def excess_series(home_cube: np.ndarray, baseline: str = "median") -> np.ndarray
     """Hourly extra load (kWh) above the home's typical load, as one flat series."""
     if baseline == "edges":
         return edge_excess(home_cube.reshape(-1))
+    if baseline == "p20_edges":
+        # p20 keeps long, slow Level 1 blocks; edges keep every-night top-ups that sit inside
+        # even a low percentile. Taking the larger of the two keeps both kinds of block.
+        return np.maximum((home_cube - typical_load(home_cube, "p20")).reshape(-1),
+                          edge_excess(home_cube.reshape(-1)))
     return (home_cube - typical_load(home_cube, baseline)).reshape(-1)
 
 

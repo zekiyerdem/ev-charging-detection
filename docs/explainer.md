@@ -31,4 +31,5 @@ Averaging a year of data hides charging that happens only on some nights, and th
 * "Clustering gives candidate groups; domain rules or a small labelled sample confirm them."
 * "With 15-minute data, the on/off edges are much sharper and Level 2 detection gets easier."
 * "Comparing each hour with the home's own median has a blind spot: someone who charges every night on the overnight rate has the charging *inside* their median. In my synthetic test 94–95% of those sessions became invisible. Edge detection (a sudden jump of several kW and a matching drop) or a low-percentile baseline brings many of them back, but the clustering step then needs to be made more stable."
+* "A single clustering run can be lucky. I repeated it over k = 5–9 and five seeds: the GMM found anywhere from 0 to 30 of the every-night chargers depending on the setting, while K-Means on the combined low-percentile + edge features stayed at F1 0.83–0.92. A majority vote over those runs gives each home an EV score instead of depending on one k."
 * "Next, I'd estimate sessions and kWh per home, which is what grid planning needs: how much EV load lands at what hour."

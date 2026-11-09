@@ -81,7 +81,7 @@ What the GMM found:
 
 ## Every-night chargers: a blind spot of the "typical load" baseline
 
-Many EV owners on the Ultra-Low Overnight rate plug in **every night**. Then charging is part of the home's normal night, so the yearly median for 11 pm or 5 am already contains it and the extra-load blocks disappear. `src/compare_baselines.py` measures this and tries four alternatives to the yearly median (`features.BASELINES`):
+Many EV owners on the Ultra-Low Overnight rate plug in **every night**. Then charging is part of the home's normal night, so the yearly median for 11 pm or 5 am already contains it and the extra-load blocks disappear. `src/compare_baselines.py` measures this and tries five alternatives to the yearly median (`features.BASELINES`):
 
 | Baseline | How "typical load" is defined |
 |---|---|
@@ -90,15 +90,16 @@ Many EV owners on the Ultra-Low Overnight rate plug in **every night**. Then cha
 | `quiet_nights` | median of each hour of day over quiet nights only (largest night hour within 1 kW of the home's 10th percentile) |
 | `rolling` | rolling 29-day median of each hour of day |
 | `edges` | no baseline: a block starts with a jump of ≥ 1.1 kW and ends when load falls back by half the jump |
+| `p20_edges` | hour by hour, the larger of the `p20` excess and the `edges` excess (keeps both kinds of block) |
 
 **Step 1: does the charging show up at all?** Share of true charging sessions with at least one hour inside a detected block (mean per home):
 
-| Charging pattern | median | p20 | quiet_nights | rolling | edges |
-|---|---|---|---|---|---|
-| every night, 11 pm timer | 0.06 | 0.14 | 0.16 | 0.06 | 0.32 |
-| every night, finish by departure | 0.05 | 0.14 | 0.22 | 0.05 | 0.29 |
-| some nights, 11 pm timer | 0.62 | 0.95 | 0.89 | 0.63 | 0.83 |
-| some nights, evening | 0.76 | 0.97 | 0.90 | 0.77 | 0.86 |
+| Charging pattern | median | p20 | quiet_nights | rolling | edges | p20_edges |
+|---|---|---|---|---|---|---|
+| every night, 11 pm timer | 0.06 | 0.14 | 0.16 | 0.06 | 0.32 | 0.38 |
+| every night, finish by departure | 0.05 | 0.14 | 0.22 | 0.05 | 0.29 | 0.35 |
+| some nights, 11 pm timer | 0.62 | 0.95 | 0.89 | 0.63 | 0.83 | 0.96 |
+| some nights, evening | 0.76 | 0.97 | 0.90 | 0.77 | 0.86 | 0.99 |
 
 With the original median, **94–95% of every-night sessions are invisible.** Part of the gap cannot be closed with hourly data: about 40% of every-night Level 2 top-ups last only one hour, shorter than the 2-hour block rule.
 
@@ -116,28 +117,72 @@ With the original median, **94–95% of every-night sessions are invisible.** Pa
 | rolling + GMM | 5 / 30 | 62 / 90 | 13 | 0.67 |
 | edges + K-Means | 29 / 30 | 78 / 90 | 23 | 0.86 |
 | edges + GMM | 8 / 30 | 73 / 90 | 13 | 0.76 |
+| p20_edges + K-Means | 28 / 30 | 90 / 90 | 20 | 0.92 |
+| p20_edges + GMM | 22 / 30 | 78 / 90 | 21 | 0.83 |
 
 What this says:
 
 * The original method finds every-night chargers only through their few long (heavy-driving) nights: K-Means misses 16 of 30, the GMM misses 8 of 30.
 * **Edge detection** makes the most every-night sessions visible (about 30%, vs 6%), because it does not care how often a block happens. The cost is weaker Level 1 detection (slow 1.3–1.9 kW starts are harder to tell from normal evening ramps).
-* A **20th-percentile baseline** gave the best single result (p20 + K-Means: all 30 every-night chargers, F1 0.92), but the same features with a GMM fell apart (0 of 30). With these results swinging this much between K-Means and GMM, no baseline is a clear winner yet: the cluster-naming step (k = 7, rules on cluster medians) is as much the bottleneck as the baseline. The default pipeline therefore still uses the median; the full tables are in `reports/baseline_comparison*.csv` and `reports/baseline_session_visibility.csv`.
+* A **20th-percentile baseline** gave the best single result (p20 + K-Means: all 30 every-night chargers, F1 0.92), but the same features with a GMM fell apart (0 of 30). Combining it with edge detection (`p20_edges`) makes the most sessions visible of all baselines (35–38% of every-night sessions, 96–99% of some-nights sessions). The full tables are in `reports/baseline_comparison*.csv` and `reports/baseline_session_visibility.csv`.
 * Most of the remaining false alarms are hot tubs, which, like every-night chargers, add a block of load almost every night.
+
+### Is one clustering run enough? (stability check)
+
+The tables above come from **one** setting (k = 7, seed 0), and the K-Means/GMM gap suggested that one run can be lucky or unlucky. `src/stability.py` repeats the clustering for every baseline over **k = 5–9 and seeds 0–4** (25 settings × K-Means and GMM = 50 runs) and gives each home an **EV score**: the share of runs that flag it. A home is flagged when its score is at least 0.5 (majority vote).
+
+Spread over the 25 settings (every-night chargers found, out of 30):
+
+| Baseline + clustering | F1 min – median – max | Every-night found min – median – max | Homes flagged min – max |
+|---|---|---|---|
+| median + K-Means | 0.83 – 0.84 – 0.86 | 12 – 14 – 19 | 117 – 129 |
+| median + GMM | 0.67 – 0.79 – 0.92 | 5 – 12 – 30 | 80 – 146 |
+| p20 + K-Means | 0.76 – 0.90 – 0.92 | 13 – 27 – 30 | 110 – 142 |
+| p20 + GMM | 0.66 – 0.76 – 0.92 | 0 – 10 – 30 | 61 – 147 |
+| quiet_nights + K-Means | 0.75 – 0.86 – 0.89 | 18 – 20 – 24 | 100 – 129 |
+| quiet_nights + GMM | 0.66 – 0.83 – 0.89 | 0 – 22 – 30 | 63 – 168 |
+| rolling + K-Means | 0.68 – 0.82 – 0.86 | 5 – 10 – 18 | 81 – 127 |
+| rolling + GMM | 0.67 – 0.70 – 0.77 | 0 – 5 – 23 | 62 – 100 |
+| edges + K-Means | 0.83 – 0.86 – 0.89 | 19 – 29 – 29 | 113 – 137 |
+| edges + GMM | 0.68 – 0.76 – 0.88 | 0 – 9 – 30 | 62 – 152 |
+| **p20_edges + K-Means** | **0.83 – 0.91 – 0.92** | **21 – 28 – 29** | 120 – 144 |
+| p20_edges + GMM | 0.61 – 0.83 – 0.88 | 0 – 21 – 28 | 68 – 134 |
+
+Majority vote on the EV score:
+
+| Baseline | Vote over all 50 runs: F1 / every-night | K-Means runs only: F1 / every-night | GMM runs only: F1 / every-night |
+|---|---|---|---|
+| median | 0.85 / 13 | 0.85 / 14 | 0.85 / 14 |
+| p20 | 0.86 / 16 | **0.92 / 30** | 0.76 / 10 |
+| quiet_nights | 0.86 / 19 | 0.86 / 19 | 0.88 / 23 |
+| rolling | 0.68 / 5 | 0.83 / 10 | 0.67 / 5 |
+| edges | 0.84 / 19 | 0.86 / 29 | 0.76 / 9 |
+| p20_edges | 0.84 / 23 | **0.91 / 28** | 0.83 / 21 |
+
+What this says:
+
+* **The GMM is the unstable part.** For every baseline, the number of every-night chargers it finds ranges from 0 (5 for the median baseline) to 23–30 depending on k and the seed. K-Means with 50 restarts hardly depends on the seed (F1 changes by at most 0.03 at a fixed k); its spread comes from the choice of k.
+* **p20_edges + K-Means is the steadiest strong option**: F1 0.83–0.92 across all settings (median 0.91) and at least 21 of 30 every-night chargers in every run. p20 + K-Means has the best single result but drops to F1 0.76 and 13 every-night chargers at k = 5. Its K-Means vote finds 28 of 30 every-night chargers and all 90 some-nights chargers, with 21 false alarms (F1 0.91).
+* Voting over K-Means **and** GMM runs does not help: the unstable GMM runs pull the vote down. The vote is useful within one algorithm, as a way to stop depending on one k.
+* The p20_edges K-Means vote flags 139 homes for 120 real EV homes: it finds 118 of the 120, and all 21 false alarms are hot tubs (21 of 22). So the **count** of EV homes is over-estimated by about the number of hot tubs; separating EVs from hot tubs is the main remaining problem.
+* Chosen next default: **`p20_edges` features, K-Means, majority vote over k = 5–9**. `detect.py` still runs the original median setup so the results above stay comparable; switching it is the next step.
+
+Outputs: `reports/stability_summary.csv`, `reports/stability_vote.csv`, `reports/stability_runs.csv` (every run) and `reports/stability_home_scores.csv` (EV score of every home).
 
 ## Run it
 
 ```bash
 pip install -r requirements.txt
-./run_all.sh          # ~1 minute: generate data, cluster, compare baselines, write reports/
+./run_all.sh          # ~2 minutes: generate data, cluster, compare baselines, check stability, write reports/
 ```
 
-Outputs in `reports/`: `results.csv`, `results_by_home_type.csv`, `cluster_profiles_gmm.csv`, `home_features.csv`, `home_predictions.csv`, `baseline_comparison.csv`, `baseline_comparison_by_type.csv`, `baseline_session_visibility.csv`, figures.
+Outputs in `reports/`: `results.csv`, `results_by_home_type.csv`, `cluster_profiles_gmm.csv`, `home_features.csv`, `home_predictions.csv`, `baseline_comparison.csv`, `baseline_comparison_by_type.csv`, `baseline_session_visibility.csv`, `stability_summary.csv`, `stability_vote.csv`, `stability_runs.csv`, `stability_home_scores.csv`, figures.
 
 `python3 src/detect.py --baseline p20` runs the main pipeline with another baseline.
 
 ## Next steps
 
-* **Every-night chargers**: make the decision step more stable (e.g. score each home directly, or check several seeds and k values), and try combining the 20th-percentile baseline with edge detection.
+* **Switch the default** in `detect.py` to `p20_edges` features with a K-Means majority vote over k = 5–9, and refresh the main results.
 * **Session-level detection**: count charging sessions and kWh per home (useful for grid planning, e.g. how much EV load lands at 11 pm).
 * Add features for **energy per block** and **night-to-night variability** to split EVs from hot tubs.
 * Try **DBSCAN/HDBSCAN** (no need to choose *k*) and **semi-supervised** labelling with a few known EV owners.

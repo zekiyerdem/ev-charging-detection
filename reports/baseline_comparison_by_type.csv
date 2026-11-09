@@ -1,9 +1,9 @@
-type,homes,median + K-Means,median + GMM,p20 + K-Means,p20 + GMM,quiet_nights + K-Means,quiet_nights + GMM,rolling + K-Means,rolling + GMM,edges + K-Means,edges + GMM
-EV L1,28,26,28,28,0,24,27,26,0,16,11
-EV L1 every-night,7,6,7,7,0,1,4,5,0,6,0
-EV L2,62,62,62,62,61,62,61,62,62,62,62
-EV L2 every-night,23,8,15,23,0,18,0,5,5,23,8
-baseboard_heat,34,0,0,0,0,0,0,0,0,1,0
-hot_tub,22,19,21,21,0,18,2,19,13,17,10
-no EV,437,0,13,0,0,0,1,0,0,0,3
-water_heater,17,0,0,1,0,0,0,0,0,5,0
+type,homes,median + K-Means,median + GMM,p20 + K-Means,p20 + GMM,quiet_nights + K-Means,quiet_nights + GMM,rolling + K-Means,rolling + GMM,edges + K-Means,edges + GMM,p20_edges + K-Means,p20_edges + GMM
+EV L1,28,26,28,28,0,24,27,26,0,16,11,28,16
+EV L1 every-night,7,6,7,7,0,1,4,5,0,6,0,7,1
+EV L2,62,62,62,62,61,62,61,62,62,62,62,62,62
+EV L2 every-night,23,8,15,23,0,18,0,5,5,23,8,21,21
+baseboard_heat,34,0,0,0,0,0,0,0,0,1,0,0,0
+hot_tub,22,19,21,21,0,18,2,19,13,17,10,20,21
+no EV,437,0,13,0,0,0,1,0,0,0,3,0,0
+water_heater,17,0,0,1,0,0,0,0,0,5,0,0,0
