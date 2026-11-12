@@ -1,0 +1,44 @@
+{
+  "flagged_homes": 104,
+  "true_ev_homes": 120,
+  "estimated_sessions": 17157,
+  "true_sessions": 26038,
+  "estimated_ev_mwh_per_year": 329.6,
+  "true_ev_mwh_per_year_upper": 455.1,
+  "estimated_share_of_energy_in_23h": 0.174,
+  "true_share_of_energy_in_23h": 0.199,
+  "estimated_peak_hour_of_day": 23,
+  "true_peak_hour_of_day": 23,
+  "estimated_avg_kw_at_23h": 157.3,
+  "true_avg_kw_at_23h": 248.1,
+  "estimated_max_coincident_kw": 231.1,
+  "estimated_max_coincident_at": "2025-03-20 23:00:00",
+  "true_max_coincident_kw": 303.1,
+  "true_max_coincident_at": "2025-03-20 23:00:00",
+  "by_type": {
+    "L1 every_night": {
+      "estimated_sessions": 1172,
+      "true_sessions": 2025,
+      "estimated_kwh": 11941,
+      "true_kwh": 19877
+    },
+    "L1 some_nights": {
+      "estimated_sessions": 5132,
+      "true_sessions": 5080,
+      "estimated_kwh": 102942,
+      "true_kwh": 93037
+    },
+    "L2 every_night": {
+      "estimated_sessions": 1586,
+      "true_sessions": 4722,
+      "estimated_kwh": 21957,
+      "true_kwh": 57834
+    },
+    "L2 some_nights": {
+      "estimated_sessions": 7371,
+      "true_sessions": 7672,
+      "estimated_kwh": 165048,
+      "true_kwh": 179493
+    }
+  }
+}

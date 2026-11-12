@@ -1,6 +1,6 @@
 {
   "baseline": "p20_edges",
-  "decision": "K-Means majority vote, k=[5, 6, 7, 8, 9], seeds=[0, 1, 2, 3, 4]",
+  "decision": "K-Means majority vote, k=[5, 6, 7, 8, 9], seeds=[0, 1, 2, 3, 4], then power check (block peak >= 5.5 kW when Level-2-like blocks on >= 3% of days)",
   "threshold": 0.5,
   "silhouette_by_k": {
     "2": 0.396,
@@ -17,12 +17,12 @@
     0,
     5
   ],
-  "estimated_ev_homes": 139,
+  "estimated_ev_homes": 118,
   "true_ev_homes": 120,
   "confusion_matrix_default[[TN,FP],[FN,TP]]": [
     [
-      489,
-      21
+      510,
+      0
     ],
     [
       2,

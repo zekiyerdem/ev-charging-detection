@@ -45,11 +45,12 @@ Outputs (in `data/`, not committed):
 
 1. **Compare every hour with the home's own normal.** For each home, compute its typical load for each hour of the day, then the *excess* above that. The default (`p20_edges`) takes, hour by hour, the larger of (a) the excess over the home's 20th-percentile load for that hour and (b) the excess after a sudden jump of ≥ 1.1 kW, until the load falls back. The first version used the yearly median, which hides homes that charge almost every night; see [Every-night chargers](#every-night-chargers-a-blind-spot-of-the-typical-load-baseline).
 2. **Find blocks.** Runs where the excess stays ≥ 3.5 kW for ≥ 2 h ("big", Level-2-like) or ≥ 1.1 kW for ≥ 4 h ("small", Level-1-like).
-3. **Describe each home with 12 features** (`src/features.py`): how often blocks happen, their power and length, how flat they are, whether they start in the evening/night, how *consistent* the start time is, whether they cluster in winter, and how strongly night-time use tracks cold weather.
+3. **Describe each home with 12 clustering features** (`src/features.py`): how often blocks happen, their power and length, how flat they are, whether they start in the evening/night, how *consistent* the start time is, whether they cluster in winter, and how strongly night-time use tracks cold weather. Three more per-block features are computed for the power check in step 7: the typical highest hour of a block (`big_block_peak_kw`), the energy per block (`big_block_kwh`) and how much block energy changes from night to night (`big_block_night_kwh_cv`).
 4. **Cluster homes** (`src/detect.py`) with K-Means on the standardised features.
 5. **Name each cluster** from its typical (median) home using physical rules of thumb (e.g. "~6 kW blocks starting at a consistent time → Level 2 EV").
 6. **Vote instead of trusting one run.** Steps 4–5 are repeated for k = 5–9 clusters and 5 random seeds (25 runs). Each home's **EV score** is the share of runs that put it in an EV cluster; a home is flagged when the score is at least 0.5. The estimated number of EV homes is the number flagged.
-7. **Score against the hidden truth** (labels are used only here, never for training).
+7. **Charger power check.** A flagged home that has Level-2-like blocks on at least 3% of days must reach charger power in them: its typical block peak must be at least 5.5 kW. Level 2 chargers on a 24–32 A circuit draw 5.8–7.7 kW; most hot tub heaters draw 4–5.5 kW. Level 1 homes almost never have such blocks, so they are not affected. See [Hot tubs vs Level 2 chargers](#hot-tubs-vs-level-2-chargers).
+8. **Score against the hidden truth** (labels are used only here, never for training).
 
 A **baseline** clusters each home's *average daily load shape*. It is the obvious first idea, but averaging a year of data blurs out charging that only happens some nights. The first version of this project (median baseline, one K-Means or GMM run with k = 7) is kept as a comparison.
 
@@ -61,22 +62,25 @@ A **baseline** clusters each home's *average daily load shape*. It is the obviou
 | First version: median features + K-Means (k = 7) | 0.84 | 0.85 | 0.85 | 121 | 120 |
 | First version: median features + GMM (k = 7) | 0.77 | 0.93 | 0.84 | 146 | 120 |
 | p20_edges features + K-Means (k = 7, one run) | 0.86 | 0.98 | 0.92 | 138 | 120 |
-| **Default: p20_edges features + K-Means vote (k = 5–9, 25 runs)** | **0.85** | **0.98** | **0.91** | **139** | **120** |
+| p20_edges features + K-Means vote (k = 5–9, 25 runs) | 0.85 | 0.98 | 0.91 | 139 | 120 |
+| same vote, 3 block features added to the clustering | 0.85 | 0.97 | 0.91 | 136 | 120 |
+| **Default: K-Means vote + charger power check (peak ≥ 5.5 kW)** | **1.00** | **0.98** | **0.99** | **118** | **120** |
+| Rules only, no clustering (same thresholds) | 0.98 | 0.99 | 0.99 | 121 | 120 |
 
-The default finds 118 of the 120 EV homes. Flagged by home type (default vs the first-version GMM):
+The default finds 118 of the 120 EV homes with no false alarms, so the estimated count (118) is now close to the true 120. Flagged by home type:
 
-| Home type | Homes | Flagged (default) | Flagged (first-version GMM) |
-|---|---|---|---|
-| EV Level 2, some nights | 62 | 62 | 62 |
-| EV Level 2, every night | 23 | 21 | 15 |
-| EV Level 1, some nights | 28 | 28 | 28 |
-| EV Level 1, every night | 7 | 7 | 7 |
-| Hot tub | 22 | **21** | 21 |
-| Electric water heater | 17 | 0 | 0 |
-| Baseboard heating | 34 | 0 | 0 |
-| No EV, no look-alike | 437 | 0 | 13 |
+| Home type | Homes | Flagged (default) | Vote only (before the power check) | First-version GMM |
+|---|---|---|---|---|
+| EV Level 2, some nights | 62 | 62 | 62 | 62 |
+| EV Level 2, every night | 23 | 21 | 21 | 15 |
+| EV Level 1, some nights | 28 | 28 | 28 | 28 |
+| EV Level 1, every night | 7 | 7 | 7 | 7 |
+| Hot tub | 22 | **0** | 21 | 21 |
+| Electric water heater | 17 | 0 | 0 | 0 |
+| Baseboard heating | 34 | 0 | 0 | 0 |
+| No EV, no look-alike | 437 | 0 | 0 | 13 |
 
-The EV score is clear-cut for most homes: 119 homes are flagged in all 25 runs, 486 in none, and only 25 fall in between (mostly Level 1 chargers at 0.8, flagged in every run except k = 5, and four water heaters at 0.04–0.2).
+The EV score (from the vote, before the power check) is clear-cut for most homes: 119 homes are flagged in all 25 runs, 486 in none, and only 25 fall in between (mostly Level 1 chargers at 0.8, flagged in every run except k = 5, and four water heaters at 0.04–0.2).
 
 What one K-Means run (k = 7) on the default features finds:
 
@@ -94,11 +98,71 @@ The naming rules call two clusters of ordinary homes "electric heating" because 
 
 **Takeaways**
 
-* Engineered, physically meaningful features beat clustering raw daily shapes (F1 0.91 vs 0.51).
-* The new default finds 28 of 30 every-night chargers (the first-version K-Means found 14) and all 90 some-nights chargers, and the Level 1 cluster is now pure: no false alarms from homes without an EV.
-* All 21 false alarms are **hot tubs** (21 of 22): like a Level 2 charger they add a flat ~4–6 kW block at night. So the estimated count (139) is too high by about the number of hot tubs (true: 120). Separating EVs from hot tubs is the main open problem.
+* Engineered, physically meaningful features beat clustering raw daily shapes (F1 0.99 vs 0.51).
+* The default finds 28 of 30 every-night chargers (the first-version K-Means found 14) and all 90 some-nights chargers, and the Level 1 cluster is pure: no false alarms from homes without an EV.
+* Clustering alone puts **hot tubs** in the Level 2 EV cluster (21 of 22 flagged by the vote): like a charger they add a flat block at night. The charger power check removes all 21 without losing an EV, so the estimated count drops from 139 to 118 (true: 120).
 * The two missed homes are every-night Level 2 chargers whose top-ups are mostly 1 hour long, shorter than the 2-hour block rule.
 * Choosing *k* is a judgement call (silhouette is highest at k = 7 among k = 2–9, 0.40, but close for 2, 6 and 8). The vote over k = 5–9 removes the need to pick one.
+
+## Hot tubs vs Level 2 chargers
+
+Before the power check, every false alarm was a hot tub. Three per-block features were added to tell them apart (medians per home, from `reports/home_features.csv`):
+
+| Home type | Block peak kW (min – median – max) | kWh per block (min – median – max) | Night-to-night variability of block energy (CV, min – median – max) |
+|---|---|---|---|
+| EV Level 2, some nights | 6.08 – 7.10 – 8.59 | 19.7 – 22.4 – 27.1 | 0.30 – 0.33 – 0.39 |
+| EV Level 2, every night | 5.99 – 6.75 – 8.04 | 10.9 – 12.6 – 14.1 | 0.18 – 0.29 – 0.35 |
+| Hot tub | 3.69 – 4.17 – 5.22 | 7.3 – 8.5 – 11.1 | 0.00 – 0.33 – 0.37 |
+
+What this says:
+
+* **Power separates them; variability does not.** No hot tub reaches a 5.5 kW block peak and no Level 2 EV stays below 5.99 kW. Night-to-night variability is about the same for both (CV ~0.3): a hot tub heater cycles at random, so its nightly energy changes as much as a driver's. Energy per block separates some-nights chargers, but every-night top-ups (11–14 kWh) overlap with large hot tubs (up to 11 kWh).
+* **Adding the features to the clustering is not enough.** With all three as extra clustering features, the vote still flags 20 hot tubs (and loses 2 EVs): 22 hot tubs are too few to form their own cluster among 630 homes. A simple rule after the clustering works better: a flagged home with regular Level-2-like blocks must reach charger power.
+* **The 5.5 kW threshold is not fragile** (`reports/power_check_sensitivity.csv`): 5.0 kW leaves 3 hot tubs flagged, 5.5 kW and 6.0 kW leave none (6.0 kW loses one every-night EV), 6.5 kW loses 19 EVs. Changing the 3% block-rate gate to 1% gives the same result; 5% lets one hot tub back in.
+* **Honest limit:** in this synthetic data, Level 2 chargers are 6–7.7 kW and hot tubs 3–5 kW, so the two power ranges do not overlap. Real homes have 16 A Level 2 chargers (~3.8 kW) and some 5.5–6 kW hot tub heaters; those cases would be missed or mixed up by a power rule alone.
+
+## Rules only vs clustering
+
+The thresholds that name the clusters can also be used on their own, home by home, with no clustering (`rules_only` in `src/detect.py`): Level-2-like blocks on at least 3% of days that peak at ≥ 5.5 kW and start at a consistent time, or long low blocks on at least 8% of days that start at a consistent time and are not winter-only. On this data that does as well as the clustering (F1 0.99: 121 flagged, 119 of 120 EVs, 2 hot tubs).
+
+That result is flattering: the thresholds were chosen knowing how the simulator works. On real meter data the power ranges of chargers and look-alikes are not known in advance. Clustering finds the groups first (including look-alikes nobody listed); thresholds then name and clean them, and should be checked on a few homes with a known EV.
+
+## Stress test: low-power chargers and bigger hot tubs
+
+The power check works here because chargers (6–7.7 kW) and hot tubs (3–5 kW) never overlap. `./run_hard_test.sh` re-generates the same homes with every third Level 2 charger made a 16 A unit (3.3–3.8 kW; 26 of 85 Level 2 homes) and hot tub heaters at 4.5–6.5 kW, and writes the results to `reports/hard_test/`.
+
+| Method (hard data) | Precision | Recall | F1 | Homes flagged | Hot tubs flagged | 16 A chargers found |
+|---|---|---|---|---|---|---|
+| K-Means vote (no power check) | 0.84 | 0.98 | 0.91 | 140 | 22 / 22 | 26 / 26 |
+| Default: vote + power check (5.5 kW) | 0.88 | 0.77 | 0.82 | 104 | 12 / 22 | **0 / 26** |
+| Rules only | 0.91 | 0.97 | 0.94 | 128 | 12 / 22 | 23 / 26 |
+
+What this says:
+
+* **The power check breaks when power overlaps.** It removes every 16 A charger (block peak 3.7–5.3 kW) and still lets 12 of 22 hot tubs through (block peak 4.6–6.7 kW). No single kW threshold fixes it (`reports/hard_test/power_check_sensitivity.csv`: 4.5 kW keeps all 22 hot tubs, 6.0 kW still keeps 7 and loses more EVs).
+* The rules-only detector does better here only because its Level 1 rule (long blocks ≥ 1.1 kW) happens to catch the long sessions of slow Level 2 chargers.
+* Separating slow chargers from hot tubs needs a feature that is not power: e.g. hot tub heaters switch on and off within a night (many 1-hour bursts), while a charger runs one continuous session; or a few labelled homes.
+
+## EV load by hour (sessions and kWh)
+
+The question behind "how many homes charge an EV" is usually "how much load, and when". `src/sessions.py` takes every flagged home, treats each of its charging blocks as one session and its excess load as EV load, and compares with the hidden session table (`ev_sessions.csv`; true load counted at full charger power for every session hour, so it slightly over-states the last hour).
+
+![EV load by hour](reports/figures/ev_load_by_hour.png)
+
+| | Estimated from the meter | True |
+|---|---|---|
+| Hour with the most EV load | 23:00 | 23:00 |
+| Average EV load at 23:00, all 630 homes | 189 kW | 261 kW |
+| Share of daily EV energy in the 23:00 hour | 17.9% | 20.5% |
+| EV energy over the year | 385 MWh | ≤ 465 MWh |
+| Largest one-hour EV load of the year | 270 kW (28 Jan, 23:00) | 329 kW (same hour) |
+| Charging sessions | 19,201 | 26,038 |
+
+What this says:
+
+* The **shape and timing are right**: the 11 pm spike from overnight-rate timers (about one fifth of all EV energy lands in that one hour) and the same peak night of the year.
+* The **amount is under-estimated by about 17–28%**, mostly (about 80% of the missing energy) from every-night chargers: their 1-hour top-ups are shorter than the block rule, so only 2,281 of 7,045 every-night Level 2 sessions are found. Some-nights Level 2 sessions are found almost one-for-one (10,487 vs 10,858).
+* Files: `reports/ev_load_by_hour.csv`, `reports/ev_sessions_per_home.csv`, `reports/session_summary.json`.
 
 ## Every-night chargers: a blind spot of the "typical load" baseline
 
@@ -185,7 +249,7 @@ What this says:
 * **The GMM is the unstable part.** For every baseline, the number of every-night chargers it finds ranges from 0 (5 for the median baseline) to 23–30 depending on k and the seed. K-Means with 50 restarts hardly depends on the seed (F1 changes by at most 0.03 at a fixed k); its spread comes from the choice of k.
 * **p20_edges + K-Means is the steadiest strong option**: F1 0.83–0.92 across all settings (median 0.91) and at least 21 of 30 every-night chargers in every run. p20 + K-Means has the best single result but drops to F1 0.76 and 13 every-night chargers at k = 5. Its K-Means vote finds 28 of 30 every-night chargers and all 90 some-nights chargers, with 21 false alarms (F1 0.91).
 * Voting over K-Means **and** GMM runs does not help: the unstable GMM runs pull the vote down. The vote is useful within one algorithm, as a way to stop depending on one k.
-* The p20_edges K-Means vote flags 139 homes for 120 real EV homes: it finds 118 of the 120, and all 21 false alarms are hot tubs (21 of 22). So the **count** of EV homes is over-estimated by about the number of hot tubs; separating EVs from hot tubs is the main remaining problem.
+* The p20_edges K-Means vote flags 139 homes for 120 real EV homes: it finds 118 of the 120, and all 21 false alarms are hot tubs (21 of 22). So the **count** of EV homes is over-estimated by about the number of hot tubs. The charger power check (added later, see [Hot tubs vs Level 2 chargers](#hot-tubs-vs-level-2-chargers)) removes them.
 * Chosen default: **`p20_edges` features, K-Means, majority vote over k = 5–9**. `detect.py` now uses it (see [Results](#results-630-homes-120-with-an-ev)); the first-version median runs are kept there as comparison rows.
 
 Outputs: `reports/stability_summary.csv`, `reports/stability_vote.csv`, `reports/stability_runs.csv` (every run) and `reports/stability_home_scores.csv` (EV score of every home).
@@ -194,17 +258,20 @@ Outputs: `reports/stability_summary.csv`, `reports/stability_vote.csv`, `reports
 
 ```bash
 pip install -r requirements.txt
-./run_all.sh          # ~2 minutes: generate data, cluster, compare baselines, check stability, write reports/
+./run_all.sh          # ~3 minutes: generate data, cluster, compare baselines, check stability, EV load by hour, write reports/
+./run_hard_test.sh    # optional stress test (16 A chargers, bigger hot tubs) -> reports/hard_test/
 ```
 
 Outputs in `reports/`: `results.csv`, `results_by_home_type.csv`, `home_predictions.csv` (EV score and flag for every home), `cluster_profiles_kmeans.csv` and `cluster_members_kmeans.csv` (default features, k = 7), `cluster_profiles_gmm.csv` (first-version GMM), `home_features.csv`, `baseline_comparison.csv`, `baseline_comparison_by_type.csv`, `baseline_session_visibility.csv`, `stability_summary.csv`, `stability_vote.csv`, `stability_runs.csv`, `stability_home_scores.csv`, figures.
+
+Also: `power_check_sensitivity.csv` (the power check with other thresholds), `ev_load_by_hour.csv`, `ev_sessions_per_home.csv`, `session_summary.json`.
 
 `python3 src/detect.py --baseline median` runs the main pipeline with another baseline; `--threshold 0.8` makes the vote stricter.
 
 ## Next steps
 
-* **Session-level detection**: count charging sessions and kWh per home (useful for grid planning, e.g. how much EV load lands at 11 pm).
-* Add features for **energy per block** and **night-to-night variability** to split EVs from hot tubs (all 21 remaining false alarms).
+* Recover the missing every-night top-ups (1-hour sessions) so the EV energy estimate is not 17–28% low.
+* Separate slow (16 A) chargers from big hot tubs in the stress test with a non-power feature, e.g. on/off cycling within a night.
 * Try **DBSCAN/HDBSCAN** (no need to choose *k*) and **semi-supervised** labelling with a few known EV owners.
 * Test on **15-minute** data, where charger on/off edges are much sharper.
 * Real-data issues: missing reads, daylight-saving shifts, solar panels (negative net load), multiple EVs per home.

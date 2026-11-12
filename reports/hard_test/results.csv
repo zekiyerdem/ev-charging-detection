@@ -1,0 +1,9 @@
+method,precision,recall,f1,estimated_ev_homes,true_ev_homes,adjusted_rand_index
+Baseline: K-Means on average daily profile,1.0,0.367,0.537,44,120,0.134
+Original: median features + K-Means (k=7),0.837,0.942,0.886,135,120,0.264
+Original: median features + GMM (k=7),0.841,0.967,0.899,138,120,0.373
+"p20_edges features + K-Means (k=7, one run)",0.843,0.983,0.908,140,120,0.168
+"p20_edges features + K-Means vote (k=5-9, 25 runs)",0.843,0.983,0.908,140,120,
+"p20_edges features + K-Means vote (k=5-9, 25 runs), + 3 block features in the clustering",0.842,0.975,0.903,139,120,
+"DEFAULT: p20_edges features + K-Means vote (k=5-9, 25 runs) + power check (peak >= 5.5 kW)",0.885,0.767,0.821,104,120,
+"Rules only, no clustering (same thresholds)",0.906,0.967,0.935,128,120,

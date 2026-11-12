@@ -5,12 +5,18 @@ Default decision (chosen in src/stability.py):
     charge almost every night as well as some-nights chargers),
   * K-Means repeated over k = 5..9 and seeds 0..4 (25 runs),
   * each home gets an EV score = share of runs that flag it; a home is flagged as
-    an EV home when the score is at least 0.5 (majority vote).
+    an EV home when the score is at least 0.5 (majority vote),
+  * charger power check: a flagged home that has regular Level-2-like blocks must reach
+    charger power in them (typical block peak >= 5.5 kW). This removes hot tubs, whose
+    3-5 kW heaters make the same kind of night block but at lower power.
 
 For comparison the script also runs:
   1. a baseline: K-Means on each home's *average daily load shape*,
   2. the original setup: `median` baseline features, one K-Means and one GMM run (k = 7),
-  3. one K-Means run (k = 7) on the default features, used for the readable cluster table.
+  3. one K-Means run (k = 7) on the default features, used for the readable cluster table,
+  4. the vote without the power check, and the vote with the three new block features
+     (peak kW, kWh per block, night-to-night variability) added to the clustering instead,
+  5. a rules-only detector: the same physical thresholds applied to each home, no clustering.
 
 Clustering is unsupervised: the labels are used ONLY at the end to score the result.
 """
@@ -36,6 +42,36 @@ FEATURES_FOR_CLUSTERING = [
     "small_block_rate", "small_block_evening_share", "high_night_share",
     "night_temp_corr", "big_block_start_spread", "small_block_start_spread", "block_winter_share",
 ]
+
+# per-block features added on 2026-11-10 to split Level 2 EVs from hot tubs; they are used
+# by the power check, and tried as extra clustering features in a comparison row
+BLOCK_FEATURES = ["big_block_peak_kw", "big_block_kwh", "big_block_night_kwh_cv"]
+
+# Charger power check. Level 2 chargers on a 24-32 A circuit draw 5.8-7.7 kW; most hot tub
+# heaters are 4-5.5 kW. A home counts as having "regular Level-2-like blocks" when they occur
+# on at least 3% of days (about 11 a year); Level 1 homes almost never have them, so they are
+# not affected. Known limit: a 16 A (3.8 kW) Level 2 charger would be removed as well.
+CHARGER_MIN_KW = 5.5
+L2_BLOCK_RATE = 0.03
+
+
+def power_check(feats: pd.DataFrame, flagged: np.ndarray, min_kw: float = CHARGER_MIN_KW,
+                min_rate: float = L2_BLOCK_RATE) -> np.ndarray:
+    """Un-flag homes whose regular Level-2-like blocks never reach charger power."""
+    low_power = ((feats["big_block_rate"] >= min_rate) & (feats["big_block_peak_kw"] < min_kw)).to_numpy()
+    return (flagged.astype(bool) & ~low_power).astype(int)
+
+
+def rules_only(feats: pd.DataFrame) -> np.ndarray:
+    """No clustering: flag a home straight from thresholds on its own features, using the same
+    rules of thumb that name the clusters. Level 2: Level-2-like blocks on >= 3% of days that
+    reach charger power and start at a consistent time. Level 1: long low blocks on >= 8% of
+    days, consistent start, not winter-only, night load not tracking the cold."""
+    l2 = ((feats["big_block_rate"] >= L2_BLOCK_RATE) & (feats["big_block_peak_kw"] >= CHARGER_MIN_KW)
+          & (feats["big_block_start_spread"] <= 2.5))
+    l1 = ((feats["small_block_rate"] >= 0.08) & (feats["small_block_start_spread"] <= 3.5)
+          & (feats["block_winter_share"] <= 0.6) & (feats["night_temp_corr"] > -0.8))
+    return (l2 | l1).astype(int).to_numpy()
 
 
 def describe_clusters(X: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
@@ -160,11 +196,34 @@ def main(data="data", reports="reports", k=7, seed=0, baseline="p20_edges", thre
     results.append(evaluate(f"{baseline} features + K-Means (k={k}, one run)", y, c["pred_km"], km))
     desc_km.round(2).to_csv(reports / "cluster_profiles_kmeans.csv")
 
-    score, pred = kmeans_vote(X, threshold=threshold)
+    score, pred_vote = kmeans_vote(X, threshold=threshold)
     n_runs = len(VOTE_KS) * len(VOTE_SEEDS)
+    vote_name = f"{baseline} features + K-Means vote (k={VOTE_KS.start}-{VOTE_KS.stop - 1}, {n_runs} runs)"
+    results.append(evaluate(vote_name, y, pred_vote))
+
+    # the new block features as extra clustering features (instead of a separate check)
+    _, pred_more = kmeans_vote(feats[FEATURES_FOR_CLUSTERING + BLOCK_FEATURES], threshold=threshold)
+    results.append(evaluate(f"{vote_name}, + 3 block features in the clustering", y, pred_more))
+
+    pred = power_check(feats, pred_vote)
     prefix = "DEFAULT: " if baseline == "p20_edges" else ""
-    results.append(evaluate(f"{prefix}{baseline} features + K-Means vote "
-                            f"(k={VOTE_KS.start}-{VOTE_KS.stop - 1}, {n_runs} runs)", y, pred))
+    results.append(evaluate(f"{prefix}{vote_name} + power check (peak >= {CHARGER_MIN_KW} kW)", y, pred))
+
+    pred_rules = rules_only(feats)
+    results.append(evaluate("Rules only, no clustering (same thresholds)", y, pred_rules))
+
+    # how much does the result depend on the 5.5 kW / 3% choice?
+    types = home_type(homes.loc[X.index]).to_numpy()
+    sens = []
+    for min_kw in [4.5, 5.0, 5.5, 6.0, 6.5]:
+        for min_rate in [0.01, 0.03, 0.05]:
+            p_ = power_check(feats, pred_vote, min_kw, min_rate)
+            r = evaluate("", y, p_); r.pop("method")
+            sens.append({"min_peak_kw": min_kw, "min_l2_block_rate": min_rate, **r,
+                         "ev_found": int(((p_ == 1) & (y == 1)).sum()),
+                         "hot_tubs_flagged": int(p_[types == "hot_tub"].sum()),
+                         "other_false_alarms": int(p_[(y == 0) & (types != "hot_tub")].sum())})
+    pd.DataFrame(sens).to_csv(reports / "power_check_sensitivity.csv", index=False)
 
     # choose k by silhouette (for information)
     sil = {kk: round(silhouette_score(Xs, KMeans(n_clusters=kk, n_init=20, random_state=seed).fit_predict(Xs)), 3)
@@ -175,6 +234,8 @@ def main(data="data", reports="reports", k=7, seed=0, baseline="p20_edges", thre
     out["kmeans_cluster"] = km
     out["ev_score"] = score.round(3)
     out["predicted_ev"] = pred
+    out["predicted_ev_vote_only"] = pred_vote
+    out["predicted_ev_rules_only"] = pred_rules
     out["predicted_ev_original_gmm"] = c_med["pred_gmm"]
     out.to_csv(reports / "home_predictions.csv")
 
@@ -184,6 +245,8 @@ def main(data="data", reports="reports", k=7, seed=0, baseline="p20_edges", thre
     # who fooled the model? errors by home type (default decision and the original GMM)
     out["type"] = home_type(out)
     by_type = out.groupby("type").agg(homes=("predicted_ev", "size"), flagged_as_ev=("predicted_ev", "sum"),
+                                      flagged_by_vote_only=("predicted_ev_vote_only", "sum"),
+                                      flagged_by_rules_only=("predicted_ev_rules_only", "sum"),
                                       flagged_by_original_gmm=("predicted_ev_original_gmm", "sum"))
     by_type.to_csv(reports / "results_by_home_type.csv")
 
@@ -192,7 +255,9 @@ def main(data="data", reports="reports", k=7, seed=0, baseline="p20_edges", thre
     members.insert(0, "name", desc_km["name"])
     members.to_csv(reports / "cluster_members_kmeans.csv")
 
-    summary = {"baseline": baseline, "decision": f"K-Means majority vote, k={list(VOTE_KS)}, seeds={list(VOTE_SEEDS)}",
+    summary = {"baseline": baseline, "decision": f"K-Means majority vote, k={list(VOTE_KS)}, seeds={list(VOTE_SEEDS)}, "
+                                                    f"then power check (block peak >= {CHARGER_MIN_KW} kW when "
+                                                    f"Level-2-like blocks on >= {L2_BLOCK_RATE:.0%} of days)",
                "threshold": threshold, "silhouette_by_k": sil, "k_for_cluster_table": k,
                "ev_clusters_kmeans_k7": [int(c) for c in c["ev_c"]],
                "estimated_ev_homes": int(pred.sum()), "true_ev_homes": int(y.sum()),
@@ -226,7 +291,8 @@ def main(data="data", reports="reports", k=7, seed=0, baseline="p20_edges", thre
     for a, (label, hid) in zip(np.atleast_1d(axes), examples):
         s = readings[week & (readings["home_id"] == hid)]
         a.plot(s["timestamp"], s["kwh"], lw=1)
-        verdict = "flagged as EV" if out.loc[hid, "predicted_ev"] else "not flagged"
+        verdict = ("flagged as EV" if out.loc[hid, "predicted_ev"] else
+                   "removed by the power check" if out.loc[hid, "predicted_ev_vote_only"] else "not flagged")
         a.set_title(f"{label} ({hid}): EV score {out.loc[hid, 'ev_score']:.2f}, {verdict}", fontsize=10)
         a.set_ylabel("kWh/h")
     fig.tight_layout(); fig.savefig(fig_dir / "example_homes_two_weeks.png", dpi=120); plt.close(fig)
@@ -237,6 +303,7 @@ def main(data="data", reports="reports", k=7, seed=0, baseline="p20_edges", thre
           "night_temp_corr", "name"]].round(2).to_string())
     print("\nWho is in each cluster:\n", members.to_string())
     print("\nFlagged as EV by home type:\n", by_type.to_string())
+    print("\nPower check sensitivity:\n", pd.DataFrame(sens).to_string(index=False))
     print("\nExample homes:", examples)
     print("\nSilhouette by k:", sil)
 

@@ -21,6 +21,11 @@ Outputs (in data/):
                          charging_pattern, look-alikes)
   ev_sessions.csv        ground-truth charging sessions (home_id, start, hours, kw)
   weather.csv            hourly temperature used to drive heating/cooling
+
+--hard makes the hot tub look-alikes harder (stress test): every third Level 2 charger
+(by home number) becomes a 16 A unit drawing 3.3-3.8 kW instead of 6-7.7 kW, and hot tub
+heaters draw 4.5-6.5 kW instead of 3-5 kW. The same random draws are reused (only
+rescaled), so every home is otherwise identical to the normal data.
 """
 import argparse
 from pathlib import Path
@@ -56,7 +61,14 @@ def base_profile(rng):
     return shape * rng.uniform(0.7, 1.4)
 
 
-def simulate_home(home_id, index, temp, rng, ev_share, lookalike_share):
+def low_power_l2(home_id, kw, hard):
+    """--hard: every third Level 2 home (by number) gets a 16 A charger, 6-7.7 kW rescaled to 3.3-3.8 kW."""
+    if hard and int(home_id[1:]) % 3 == 0:
+        return 3.3 + (kw - 6.0) / 1.7 * 0.5
+    return kw
+
+
+def simulate_home(home_id, index, temp, rng, ev_share, lookalike_share, hard=False):
     n = len(index)
     hour = index.hour.values
     weekend = (index.dayofweek.values >= 5)
@@ -87,6 +99,8 @@ def simulate_home(home_id, index, temp, rng, ev_share, lookalike_share):
         level = "L2" if rng.random() < 0.7 else "L1"
         info["charger_level"] = level
         kw = rng.uniform(6.0, 7.7) if level == "L2" else rng.uniform(1.3, 1.9)
+        if level == "L2":
+            kw = low_power_l2(home_id, kw, hard)
         sessions_per_week = rng.uniform(1.5, 5.5)
         # many Ontario drivers set the charger to start at 11 pm (Ultra-Low Overnight price)
         uses_timer = rng.random() < 0.55
@@ -118,6 +132,8 @@ def simulate_home(home_id, index, temp, rng, ev_share, lookalike_share):
             load += mask * kw
         elif kind == "hot_tub":         # 3-5 kW heater cycling at night, all year
             kw = rng.uniform(3.0, 5.0)
+            if hard:                    # bigger heaters: 3-5 kW rescaled to 4.5-6.5 kW
+                kw += 1.5
             mask = ((hour >= 0) & (hour <= 5)) & (rng.random(n) < 0.35)
             load += mask * kw
         else:                           # electric baseboard: big, temperature-driven, winter only
@@ -126,13 +142,15 @@ def simulate_home(home_id, index, temp, rng, ev_share, lookalike_share):
     return np.round(np.clip(load, 0.05, None), 3), info, sessions
 
 
-def add_every_night_charging(home_id, index, load, rng):
+def add_every_night_charging(home_id, index, load, rng, hard=False):
     """Every-night (or most-nights) charging: short top-ups sized by the day's driving.
 
     Modifies load in place and returns (info updates, sessions)."""
     n = len(index)
     level = "L2" if rng.random() < 0.8 else "L1"
     kw = rng.uniform(6.0, 7.7) if level == "L2" else rng.uniform(1.3, 1.9)
+    if level == "L2":
+        kw = low_power_l2(home_id, kw, hard)
     nights_share = rng.uniform(0.85, 1.0)                # plugs in on 85-100% of nights
     daily_kwh = rng.uniform(5, 12)                       # typical daily driving (~30-75 km)
     mode = "timer_23h" if rng.random() < 0.5 else "departure"
@@ -165,7 +183,7 @@ def add_every_night_charging(home_id, index, load, rng):
 
 
 def main(n_homes=600, days=365, ev_share=0.15, lookalike_share=0.15, seed=42, out="data",
-         every_night_homes=30):
+         every_night_homes=30, hard=False):
     rng = np.random.default_rng(seed)
     index = pd.date_range("2025-01-01", periods=days * 24, freq="h")
     temp = make_temperature(index, rng)
@@ -175,7 +193,7 @@ def main(n_homes=600, days=365, ev_share=0.15, lookalike_share=0.15, seed=42, ou
     frames, infos, all_sessions = [], [], []
     for i in range(n_homes):
         home_id = f"H{i:04d}"
-        kwh, info, sessions = simulate_home(home_id, index, temp, rng, ev_share, lookalike_share)
+        kwh, info, sessions = simulate_home(home_id, index, temp, rng, ev_share, lookalike_share, hard)
         info["charging_pattern"] = "some_nights" if info["has_ev"] else ""
         frames.append(pd.DataFrame({"home_id": home_id, "timestamp": index, "kwh": kwh}))
         infos.append(info)
@@ -186,7 +204,7 @@ def main(n_homes=600, days=365, ev_share=0.15, lookalike_share=0.15, seed=42, ou
     for i in range(n_homes, n_homes + every_night_homes):
         home_id = f"H{i:04d}"
         load, info, _ = simulate_home(home_id, index, temp, rng_night, ev_share=0.0, lookalike_share=0.0)
-        extra, sessions = add_every_night_charging(home_id, index, load, rng_night)
+        extra, sessions = add_every_night_charging(home_id, index, load, rng_night, hard)
         info.update(extra)
         frames.append(pd.DataFrame({"home_id": home_id, "timestamp": index, "kwh": np.round(load, 3)}))
         infos.append(info)
@@ -215,5 +233,7 @@ if __name__ == "__main__":
                    help="extra homes that charge on most nights (added after --homes)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--out", default="data")
+    p.add_argument("--hard", action="store_true",
+                   help="stress test: 16 A (3.3-3.8 kW) Level 2 chargers in every third Level 2 home, 4.5-6.5 kW hot tubs")
     a = p.parse_args()
-    main(a.homes, a.days, a.ev_share, a.lookalike_share, a.seed, a.out, a.every_night_homes)
+    main(a.homes, a.days, a.ev_share, a.lookalike_share, a.seed, a.out, a.every_night_homes, a.hard)

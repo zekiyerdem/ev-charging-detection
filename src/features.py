@@ -178,12 +178,29 @@ def home_features(home_cube: np.ndarray, days: pd.DatetimeIndex, temp_by_day: np
     high_nights = float(np.mean(night > night_med + 6.0))         # nights with a big extra chunk of energy
     temp_corr = float(np.corrcoef(night, temp_by_day)[0, 1]) if np.std(night) > 0 else 0.0
 
+    # what each Level-2-like block looks like on its own (added to split EVs from hot tubs):
+    # a charger draws its full rated power (6-7.7 kW) for whole hours, so the highest hour of a
+    # block is high and a block holds a lot of energy; a 3-5 kW hot tub heater never gets there.
+    block_peak = [float(excess[s:s + length].max()) for s, length, _ in big]
+    block_kwh = [float(excess[s:s + length].sum()) for s, length, _ in big]
+    # night-to-night variability: block energy summed per night (a night runs 6 am to 6 am),
+    # then the coefficient of variation over the nights that have a block. Charging energy
+    # follows the day's driving; a hot tub thermostat uses about the same energy every night.
+    if big:
+        per_night = pd.Series(block_kwh).groupby([(s - 6) // 24 for s, _, _ in big]).sum()
+        kwh_cv = float(per_night.std(ddof=0) / per_night.mean()) if len(per_night) >= 3 else 0.0
+    else:
+        kwh_cv = 0.0
+
     return {
         "big_block_rate": len(big) / n_days,              # L2-style blocks per day
         "big_block_hours": np.mean([b[1] for b in big]) if big else 0.0,
         "big_block_kw": np.mean([b[2] for b in big]) if big else 0.0,
         "big_block_evening_share": evening_night_share(big),
         "big_block_flatness": flatness(big),
+        "big_block_peak_kw": float(np.median(block_peak)) if big else 0.0,   # typical highest hour
+        "big_block_kwh": float(np.median(block_kwh)) if big else 0.0,        # typical energy per block
+        "big_block_night_kwh_cv": kwh_cv,                 # night-to-night variability of block energy
         "small_block_rate": len(small) / n_days,          # L1-style blocks per day
         "small_block_evening_share": evening_night_share(small),
         "big_block_start_spread": start_spread(big),
