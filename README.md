@@ -254,15 +254,42 @@ What this says:
 
 Outputs: `reports/stability_summary.csv`, `reports/stability_vote.csv`, `reports/stability_runs.csv` (every run) and `reports/stability_home_scores.csv` (EV score of every home).
 
+### HDBSCAN: no k to choose, but a different knob
+
+K-Means and the GMM both need the number of clusters *k*, and the GMM swings a lot with it. **HDBSCAN** is a density-based method: it finds as many clusters as the data supports and leaves homes that fit no dense group as **noise** (never flagged as EV here). It has no random seed; its main setting is `min_cluster_size`, the smallest group that counts as a cluster. `src/hdbscan_compare.py` runs it on the same standardised features with `min_cluster_size` = 5, 10, 15, 20, 30 and 40, names the clusters with the same rules as `detect.py`, and compares it with the GMM (one k = 7 run and the 25-run vote over k = 5–9).
+
+| Features + method | Clusters | Noise homes (EVs in noise) | Precision | Recall | F1 | Flagged | Every-night found | Hot tubs flagged | F1 after power check |
+|---|---|---|---|---|---|---|---|---|---|
+| median + HDBSCAN (min size 5) | 14 | 57 (34) | 0.97 | 0.63 | 0.77 | 78 | 8 / 30 | 2 | 0.77 |
+| median + HDBSCAN (min size 10) | 7 | 67 (22) | 0.86 | 0.80 | 0.83 | 112 | 21 / 30 | 16 | 0.87 |
+| median + HDBSCAN (min size 15–40) | 2–5 | 96–205 (37–53) | 0.81–0.82 | 0.50–0.62 | 0.62–0.71 | 74–90 | 7–14 / 30 | 14–16 | 0.66–0.75 |
+| median + GMM (k = 7, one run) | 7 | – | 0.77 | 0.93 | 0.84 | 146 | 22 / 30 | 21 | 0.88 |
+| median + GMM vote (k = 5–9, 25 runs) | – | – | 0.83 | 0.87 | 0.85 | 125 | 14 / 30 | 20 | 0.89 |
+| **p20_edges + HDBSCAN (min size 5)** | 22 | 144 (18) | 0.93 | 0.85 | **0.89** | 110 | 18 / 30 | 8 | **0.92** |
+| p20_edges + HDBSCAN (min size 10–30) | 5–8 | 179–295 (46–50) | 0.78–0.83 | 0.58–0.62 | 0.67–0.69 | 84–94 | 9–12 / 30 | 14–19 | 0.74–0.76 |
+| p20_edges + HDBSCAN (min size 40) | 3 | 290 (51) | 0.60 | 0.58 | 0.59 | 115 | 8 / 30 | 12 | 0.62 |
+| p20_edges + GMM (k = 7, one run) | 7 | – | 0.83 | 0.83 | 0.83 | 121 | 22 / 30 | 21 | 0.91 |
+| p20_edges + GMM vote (k = 5–9, 25 runs) | – | – | 0.83 | 0.83 | 0.83 | 119 | 21 / 30 | 20 | 0.90 |
+| *Default for reference: p20_edges + K-Means vote + power check* | | | 1.00 | 0.98 | 0.99 | 118 | 28 / 30 | 0 | |
+
+What this says:
+
+* **HDBSCAN removes k but not the tuning.** F1 moves from 0.59 to 0.89 with `min_cluster_size` (p20_edges features), about as much as the GMM moves with k (0.61–0.88). There is no label-free way to tell that 5 is the right value here.
+* **Noise is where the EVs get lost.** With the default features HDBSCAN puts 144–295 of the 630 homes in noise, including 18–51 EV homes. Level 1 chargers suffer most: with `min_cluster_size` = 10 none of the 35 Level 1 homes is flagged (`reports/hdbscan_by_home_type.csv`). EV homes are spread out in feature space (different chargers, schedules and driving), so they do not form one dense group.
+* As a result HDBSCAN **under-counts** EV homes (74–115 flagged for 120), while the GMM and K-Means over-count because of hot tubs.
+* Its best setting (p20_edges, min size 5: F1 0.89, 0.92 after the power check) beats one GMM run and the GMM vote (0.83), but stays well below the default K-Means vote + power check (0.99). **The default does not change.** HDBSCAN's noise label could still be useful as a "this home is unusual, have a look" list, not as the EV decision.
+
+Outputs: `reports/hdbscan_comparison.csv` (every setting, with spreads for the GMM runs) and `reports/hdbscan_by_home_type.csv`.
+
 ## Run it
 
 ```bash
 pip install -r requirements.txt
-./run_all.sh          # ~3 minutes: generate data, cluster, compare baselines, check stability, EV load by hour, write reports/
+./run_all.sh          # ~3 minutes: generate data, cluster, compare baselines, check stability, HDBSCAN comparison, EV load by hour, write reports/
 ./run_hard_test.sh    # optional stress test (16 A chargers, bigger hot tubs) -> reports/hard_test/
 ```
 
-Outputs in `reports/`: `results.csv`, `results_by_home_type.csv`, `home_predictions.csv` (EV score and flag for every home), `cluster_profiles_kmeans.csv` and `cluster_members_kmeans.csv` (default features, k = 7), `cluster_profiles_gmm.csv` (first-version GMM), `home_features.csv`, `baseline_comparison.csv`, `baseline_comparison_by_type.csv`, `baseline_session_visibility.csv`, `stability_summary.csv`, `stability_vote.csv`, `stability_runs.csv`, `stability_home_scores.csv`, figures.
+Outputs in `reports/`: `results.csv`, `results_by_home_type.csv`, `home_predictions.csv` (EV score and flag for every home), `cluster_profiles_kmeans.csv` and `cluster_members_kmeans.csv` (default features, k = 7), `cluster_profiles_gmm.csv` (first-version GMM), `home_features.csv`, `baseline_comparison.csv`, `baseline_comparison_by_type.csv`, `baseline_session_visibility.csv`, `stability_summary.csv`, `stability_vote.csv`, `stability_runs.csv`, `stability_home_scores.csv`, `hdbscan_comparison.csv`, `hdbscan_by_home_type.csv`, figures.
 
 Also: `power_check_sensitivity.csv` (the power check with other thresholds), `ev_load_by_hour.csv`, `ev_sessions_per_home.csv`, `session_summary.json`.
 
@@ -272,6 +299,6 @@ Also: `power_check_sensitivity.csv` (the power check with other thresholds), `ev
 
 * Recover the missing every-night top-ups (1-hour sessions) so the EV energy estimate is not 17–28% low.
 * Separate slow (16 A) chargers from big hot tubs in the stress test with a non-power feature, e.g. on/off cycling within a night.
-* Try **DBSCAN/HDBSCAN** (no need to choose *k*) and **semi-supervised** labelling with a few known EV owners.
+* Try **semi-supervised** labelling with a few known EV owners (HDBSCAN was tried and did not beat the K-Means vote; see above).
 * Test on **15-minute** data, where charger on/off edges are much sharper.
 * Real-data issues: missing reads, daylight-saving shifts, solar panels (negative net load), multiple EVs per home.

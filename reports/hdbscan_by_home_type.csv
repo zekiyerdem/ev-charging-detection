@@ -1,0 +1,9 @@
+type,homes,median: HDBSCAN (min_cluster_size=5),median: HDBSCAN (min_cluster_size=10),"median: GMM (k=7, one run)",p20_edges: HDBSCAN (min_cluster_size=5),p20_edges: HDBSCAN (min_cluster_size=10),"p20_edges: GMM (k=7, one run)"
+EV L1,28,18,13,28,25,0,16
+EV L1 every-night,7,3,2,7,4,0,1
+EV L2,62,50,62,62,59,62,62
+EV L2 every-night,23,5,19,15,14,12,21
+baseboard_heat,34,0,0,0,0,0,0
+hot_tub,22,2,16,21,8,19,21
+no EV,437,0,0,13,0,0,0
+water_heater,17,0,0,0,0,1,0

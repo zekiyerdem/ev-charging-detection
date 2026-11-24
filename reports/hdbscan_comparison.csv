@@ -1,0 +1,17 @@
+baseline,method,clusters,noise_homes,ev_homes_in_noise,precision,recall,f1,estimated_ev_homes,true_ev_homes,every_night_found,hot_tubs_flagged,other_false_alarms,f1_after_power_check,flagged_after_power_check,f1_min_over_runs,f1_max_over_runs,every_night_min_over_runs,every_night_max_over_runs
+median,HDBSCAN (min_cluster_size=5),14,57,34,0.974,0.633,0.768,78,120,8,2,0,0.768,78,,,,
+median,HDBSCAN (min_cluster_size=10),7,67,22,0.857,0.8,0.828,112,120,21,16,0,0.87,96,,,,
+median,HDBSCAN (min_cluster_size=15),5,96,45,0.822,0.617,0.705,90,120,14,16,0,0.749,75,,,,
+median,HDBSCAN (min_cluster_size=20),4,205,51,0.812,0.575,0.673,85,120,11,16,0,0.716,70,,,,
+median,HDBSCAN (min_cluster_size=30),2,102,37,0.819,0.567,0.67,83,120,9,15,0,0.713,68,,,,
+median,HDBSCAN (min_cluster_size=40),2,133,53,0.811,0.5,0.619,74,120,7,14,0,0.659,59,,,,
+median,"GMM (k=7, seed 0, one run)",7,0,0,0.767,0.933,0.842,146,120,22,21,13,0.88,130,,,,
+median,"GMM vote (k=5-9, seeds 0-4, 25 runs)",,,,0.832,0.867,0.849,125,120,14,20,1,0.891,109,0.67,0.915,5,30
+p20_edges,HDBSCAN (min_cluster_size=5),22,144,18,0.927,0.85,0.887,110,120,18,8,0,0.919,102,,,,
+p20_edges,HDBSCAN (min_cluster_size=10),8,179,46,0.787,0.617,0.692,94,120,12,19,1,0.763,74,,,,
+p20_edges,HDBSCAN (min_cluster_size=15),6,206,49,0.78,0.592,0.673,91,120,9,19,1,0.743,71,,,,
+p20_edges,HDBSCAN (min_cluster_size=20),6,213,48,0.783,0.6,0.679,92,120,10,19,1,0.75,72,,,,
+p20_edges,HDBSCAN (min_cluster_size=30),5,295,50,0.833,0.583,0.686,84,120,9,14,0,0.737,70,,,,
+p20_edges,HDBSCAN (min_cluster_size=40),3,290,51,0.6,0.575,0.587,115,120,8,12,34,0.622,102,,,,
+p20_edges,"GMM (k=7, seed 0, one run)",7,0,0,0.826,0.833,0.83,121,120,22,21,0,0.909,100,,,,
+p20_edges,"GMM vote (k=5-9, seeds 0-4, 25 runs)",,,,0.832,0.825,0.828,119,120,21,20,0,0.904,99,0.613,0.88,0,28
